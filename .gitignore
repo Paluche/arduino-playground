@@ -1,0 +1,5 @@
+*.swp
+*.swo
+
+build-mega-atmega2560
+build-uno
