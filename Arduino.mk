@@ -236,18 +236,14 @@
 #
 ########################################################################
 
-######
-# Homemade configuration
-ARDUINO_SKETCHBOOK := $(shell dirname $(shell pwd))
-ARDUINO_DIR := /usr/share/arduino
-
-all: first
-
 arduino_output =
 # When output is not suppressed and we're in the top-level makefile,
 # running for the first time (i.e., not after a restart after
 # regenerating the dependency file), then output the configuration.
 ifndef ARDUINO_QUIET
+    ARDUINO_QUIET = 0
+endif
+ifeq ($(ARDUINO_QUIET),0)
     ifeq ($(MAKE_RESTARTS),)
         ifeq ($(MAKELEVEL),0)
             arduino_output = $(info $(1))
@@ -678,6 +674,16 @@ ifeq ($(strip $(NO_CORE)),)
         $(call show_config_variable,VARIANT,[USER])
     endif
 
+    ifndef BOARD
+	BOARD := $(call PARSE_BOARD,$(BOARD_TAG),build.board)
+        ifndef BOARD
+            BOARD := $(shell echo $(ARCHITECTURE)_$(BOARD_TAG) | tr '[:lower:]' '[:upper:]')
+        endif
+        $(call show_config_variable,BOARD,[COMPUTED],(from build.board))
+    else
+        $(call show_config_variable,BOARD,[USER])
+    endif
+
     # see if we are a caterina device like leonardo or micro
     CATERINA := $(findstring caterina,$(call PARSE_BOARD,$(BOARD_TAG),menu.(chip|cpu).$(BOARD_SUB).bootloader.file))
     ifndef CATERINA
@@ -857,15 +863,16 @@ endif
 # Reset
 
 ifndef RESET_CMD
-  ARD_RESET_ARDUINO := $(shell which ard-reset-arduino 2> /dev/null)
-  ifndef ARD_RESET_ARDUINO
+  ARD_RESET_ARDUINO_PATH := $(shell which ard-reset-arduino 2> /dev/null)
+  ifndef ARD_RESET_ARDUINO_PATH
     # same level as *.mk in bin directory when checked out from git
     # or in $PATH when packaged
-    ARD_RESET_ARDUINO = $(ARDMK_DIR)/bin/ard-reset-arduino
+    ARD_RESET_ARDUINO_PATH = $(ARDMK_DIR)/bin/ard-reset-arduino
   endif
+  ARD_RESET_ARDUINO := $(PYTHON_CMD) $(ARD_RESET_ARDUINO_PATH)
   ifneq (,$(findstring CYGWIN,$(shell uname -s)))
       # confirm user is using default cygwin unix Python (which uses ttySx) and not Windows Python (which uses COMx)
-      ifeq ($(shell which python),/usr/bin/python)
+      ifeq ($(PYTHON_CMD),/usr/bin/python)
         RESET_CMD = $(ARD_RESET_ARDUINO) $(ARD_RESET_OPTS) $(DEVICE_PATH)
       else
         RESET_CMD = $(ARD_RESET_ARDUINO) $(ARD_RESET_OPTS) $(call get_monitor_port)
@@ -873,6 +880,9 @@ ifndef RESET_CMD
     else
         RESET_CMD = $(ARD_RESET_ARDUINO) $(ARD_RESET_OPTS) $(call get_monitor_port)
     endif
+    $(call show_config_variable,RESET_CMD,[COMPUTED],(from PYTHON_CMD, ARD_RESET_OPTS and MONITOR_PORT))
+else
+    $(call show_config_variable,RESET_CMD,[USER])
 endif
 
 ifneq ($(CATERINA),)
@@ -891,11 +901,11 @@ LOCAL_PDE_SRCS  ?= $(wildcard *.pde)
 LOCAL_INO_SRCS  ?= $(wildcard *.ino)
 LOCAL_AS_SRCS   ?= $(wildcard *.S)
 LOCAL_SRCS      = $(LOCAL_C_SRCS)   $(LOCAL_CPP_SRCS) \
-                  $(LOCAL_CC_SRCS)  $(LOCAL_PDE_SRCS) \
-                  $(LOCAL_INO_SRCS) $(LOCAL_AS_SRCS)
-LOCAL_OBJ_FILES = $(LOCAL_C_SRCS:.c=.c.o)       $(LOCAL_CPP_SRCS:.cpp=.cpp.o) \
-                  $(LOCAL_CC_SRCS:.cc=.cc.o)    $(LOCAL_PDE_SRCS:.pde=.pde.o) \
-                  $(LOCAL_INO_SRCS:.ino=.ino.o) $(LOCAL_AS_SRCS:.S=.S.o)
+		$(LOCAL_CC_SRCS)   $(LOCAL_PDE_SRCS) \
+		$(LOCAL_INO_SRCS) $(LOCAL_AS_SRCS)
+LOCAL_OBJ_FILES = $(LOCAL_C_SRCS:.c=.c.o)   $(LOCAL_CPP_SRCS:.cpp=.cpp.o) \
+		$(LOCAL_CC_SRCS:.cc=.cc.o)   $(LOCAL_PDE_SRCS:.pde=.pde.o) \
+		$(LOCAL_INO_SRCS:.ino=.ino.o) $(LOCAL_AS_SRCS:.S=.S.o)
 LOCAL_OBJS      = $(patsubst %,$(OBJDIR)/%,$(LOCAL_OBJ_FILES))
 
 ifeq ($(words $(LOCAL_SRCS)), 0)
@@ -928,6 +938,10 @@ ifeq ($(strip $(NO_CORE)),)
         CORE_C_SRCS    += $(wildcard $(ARDUINO_CORE_PATH)/$(TOOL_PREFIX)-libc/*.c)
         CORE_CPP_SRCS   = $(wildcard $(ARDUINO_CORE_PATH)/*.cpp)
         CORE_AS_SRCS    = $(wildcard $(ARDUINO_CORE_PATH)/*.S)
+
+        # ArduinoCore-API
+        CORE_C_SRCS    += $(wildcard $(ARDUINO_CORE_PATH)/api/*.c)
+        CORE_CPP_SRCS  += $(wildcard $(ARDUINO_CORE_PATH)/api/*.cpp)
 
         # USB Core if samd or sam
         ifeq ($(findstring sam, $(strip $(ARCHITECTURE))), sam)
@@ -1004,7 +1018,7 @@ ifeq ($(strip $(NO_CORE)),)
             $(call show_config_variable,MONITOR_BAUDRATE,[DETECTED], (in sketch))
         endif
     else
-        $(call show_config_variable,MONITOR_BAUDRATE, [USER])
+        $(call show_config_variable,MONITOR_BAUDRATE,[USER])
     endif
 
     ifndef MONITOR_CMD
@@ -1162,10 +1176,11 @@ else
 endif
 
 # Using += instead of =, so that CPPFLAGS can be set per sketch level
-CPPFLAGS      += -$(MCU_FLAG_NAME)=$(MCU) -DF_CPU=$(F_CPU) -DARDUINO=$(ARDUINO_VERSION) $(ARDUINO_ARCH_FLAG) \
-        -I$(ARDUINO_CORE_PATH) -I$(ARDUINO_VAR_PATH)/$(VARIANT) \
-        $(SYS_INCLUDES) $(PLATFORM_INCLUDES) $(USER_INCLUDES) -Wall -Wextra \
-        -Wno-deprecated-function -ffunction-sections -fdata-sections
+CPPFLAGS      += -$(MCU_FLAG_NAME)=$(MCU) -DF_CPU=$(F_CPU) -DARDUINO=$(ARDUINO_VERSION) -DARDUINO_$(BOARD) $(ARDUINO_ARCH_FLAG) \
+         "-DARDUINO_BOARD=\"$(BOARD)\"" "-DARDUINO_VARIANT=\"$(VARIANT)\"" \
+        -I$(ARDUINO_CORE_PATH) -I$(ARDUINO_CORE_PATH)/api -I$(ARDUINO_VAR_PATH)/$(VARIANT) \
+        $(SYS_INCLUDES) $(PLATFORM_INCLUDES) $(USER_INCLUDES) -Wall -ffunction-sections \
+        -fdata-sections
 
 # PROG_TYPES_COMPAT is enabled by default for compatibility with the Arduino IDE.
 # By placing it before the user-provided CPPFLAGS rather than after, we allow the
@@ -1223,19 +1238,28 @@ else
     $(call show_config_variable,CXXFLAGS_STD,[USER])
 endif
 
-CFLAGS        += $(CFLAGS_STD) -Wall -Wextra
-CXXFLAGS      += -fpermissive -fno-exceptions $(CXXFLAGS_STD) -Wall -Wextra
+CFLAGS        += $(CFLAGS_STD)
+CXXFLAGS      += -fpermissive -fno-exceptions $(CXXFLAGS_STD)
 ASFLAGS       += -x assembler-with-cpp
 DIAGNOSTICS_COLOR_WHEN ?= always
-ifeq ($(shell expr $(CC_VERNUM) '>' 490), 1)
-    ASFLAGS  += -flto
-    CXXFLAGS += -fno-threadsafe-statics -flto -fno-devirtualize -fdiagnostics-color=$(DIAGNOSTICS_COLOR_WHEN)
-    CFLAGS   += -flto -fno-fat-lto-objects -fdiagnostics-color=$(DIAGNOSTICS_COLOR_WHEN)
+
+# Flags for AVR
+ifeq ($(findstring avr, $(strip $(CC_NAME))), avr)
+    ifeq ($(shell expr $(CC_VERNUM) '>' 490), 1)
+        ASFLAGS  += -flto
+        CXXFLAGS += -fno-threadsafe-statics -flto -fno-devirtualize -fdiagnostics-color=$(DIAGNOSTICS_COLOR_WHEN)
+        CFLAGS   += -flto -fno-fat-lto-objects -fdiagnostics-color=$(DIAGNOSTICS_COLOR_WHEN)
+        LDFLAGS += -flto -fuse-linker-plugin
+    endif
+# Flags for ARM (most set in Sam.mk)
+else
+    ifeq ($(shell expr $(CC_VERNUM) '>' 490), 1)
+        CXXFLAGS += -fdiagnostics-color=$(DIAGNOSTICS_COLOR_WHEN)
+        CFLAGS   += -fdiagnostics-color=$(DIAGNOSTICS_COLOR_WHEN)
+    endif
 endif
+
 LDFLAGS       += -$(MCU_FLAG_NAME)=$(MCU) -Wl,--gc-sections -O$(OPTIMIZATION_LEVEL)
-ifeq ($(shell expr $(CC_VERNUM) '>' 490), 1)
-    LDFLAGS       += -flto -fuse-linker-plugin
-endif
 SIZEFLAGS     ?= --mcu=$(MCU) -C
 
 # for backwards compatibility, grab ARDUINO_PORT if the user has it set
@@ -1261,7 +1285,7 @@ else
     # If no port is specified, try to guess it from wildcards.
     # Will only work if the Arduino is the only/first device matched.
     DEVICE_PATH = $(firstword $(wildcard \
-           /dev/ttyACM? /dev/ttyUSB? /dev/tty.usbserial* /dev/tty.usbmodem* /dev/tty.wchusbserial*))
+			/dev/ttyACM? /dev/ttyUSB? /dev/tty.usbserial* /dev/tty.usbmodem* /dev/tty.wchusbserial*))
     $(call show_config_variable,DEVICE_PATH,[AUTODETECTED])
 endif
 
@@ -1293,9 +1317,14 @@ ifneq (,$(findstring AVR,$(shell $(SIZE) --help)))
     avr_size = $(SIZE) $(SIZEFLAGS) --format=avr $(1)
     $(call show_config_info,Size utility: AVR-aware for enhanced output,[AUTODETECTED])
 else
-    # We have a plain-old binutils version - just give it the hex.
-    avr_size = $(SIZE) $(2)
-    $(call show_config_info,Size utility: Basic (not AVR-aware),[AUTODETECTED])
+    ifeq ($(findstring sam, $(strip $(ARCHITECTURE))), sam)
+       avr_size = $(SIZE) $(SIZEFLAGS) $(1)
+       $(call show_config_info,Size utility: ARM,[AUTODETECTED])
+    else
+       # We have a plain-old binutils version - just give it the hex.
+       avr_size = $(SIZE) $(2)
+       $(call show_config_info,Size utility: Basic (not AVR-aware),[AUTODETECTED])
+    endif
 endif
 
 ifneq (,$(strip $(ARDUINO_LIBS)))
@@ -1541,7 +1570,11 @@ endif
 # -D - Disable auto erase for flash memory
 # Note: -D is needed for Mega boards.
 #       (See https://github.com/sudar/Arduino-Makefile/issues/114#issuecomment-25011005)
-AVRDUDE_ARD_OPTS = -D -c $(AVRDUDE_ARD_PROGRAMMER) -b $(AVRDUDE_ARD_BAUDRATE) -P
+ifeq ($(AVRDUDE_AUTOERASE_FLASH), yes)
+else
+    AVRDUDE_ARD_OPTS = -D
+endif
+AVRDUDE_ARD_OPTS += -c $(AVRDUDE_ARD_PROGRAMMER) -b $(AVRDUDE_ARD_BAUDRATE) -P
 ifeq ($(CURRENT_OS), WINDOWS)
     # get_monitor_port checks to see if the monitor port exists, assuming it is
     # a file. In Windows, avrdude needs the port in the format 'com1' which is
@@ -1640,7 +1673,7 @@ endif
 ########################################################################
 # Explicit targets start here
 
-first: $(TARGET_EEP) $(TARGET_BIN) $(TARGET_HEX)
+all: 		$(TARGET_EEP) $(TARGET_BIN) $(TARGET_HEX)
 
 # Rule to create $(OBJDIR) automatically. All rules with recipes that
 # create a file within it, but do not already depend on a file within it
@@ -1649,133 +1682,134 @@ first: $(TARGET_EEP) $(TARGET_BIN) $(TARGET_HEX)
 # list) to prevent remaking the target when any file in the directory
 # changes.
 $(OBJDIR): pre-build
-	$(MKDIR) $(OBJDIR)
+		$(MKDIR) $(OBJDIR)
 
 pre-build:
-	$(call runscript_if_exists,$(PRE_BUILD_HOOK))
+		$(call runscript_if_exists,$(PRE_BUILD_HOOK))
 
 # copied from arduino with start-group, end-group
-$(TARGET_ELF): $(LOCAL_OBJS) $(CORE_LIB) $(OTHER_OBJS)
-# sam devices need start and end group
+$(TARGET_ELF): 	$(LOCAL_OBJS) $(CORE_LIB) $(OTHER_OBJS)
+# sam devices need start and end group, and must be linked using C++ compiler
 ifeq ($(findstring sam, $(strip $(ARCHITECTURE))), sam)
-	$(CC) $(LINKER_SCRIPTS) -Wl,-Map=$(OBJDIR)/$(TARGET).map -o $@ $(LOCAL_OBJS) $(OTHER_OBJS) $(OTHER_LIBS) $(LDFLAGS) $(CORE_LIB) -Wl,--end-group
+		$(CXX) $(LINKER_SCRIPTS) -Wl,-Map=$(OBJDIR)/$(TARGET).map -o $@ $(LOCAL_OBJS) $(OTHER_OBJS) $(OTHER_LIBS) $(LDFLAGS) $(CORE_LIB) -Wl,--end-group
 # otherwise traditional
 else
-	$(CC) $(LDFLAGS) -o $@ $(LOCAL_OBJS) $(OTHER_OBJS) $(OTHER_LIBS) $(CORE_LIB) -lc -lm $(LINKER_SCRIPTS)
+		$(CC) $(LDFLAGS) -o $@ $(LOCAL_OBJS) $(OTHER_OBJS) $(OTHER_LIBS) $(CORE_LIB) -lc -lm $(LINKER_SCRIPTS)
 endif
 
-$(CORE_LIB): $(CORE_OBJS) $(LIB_OBJS) $(PLATFORM_LIB_OBJS) $(USER_LIB_OBJS)
-	$(AR) rcs $@ $(CORE_OBJS) $(LIB_OBJS) $(PLATFORM_LIB_OBJS) $(USER_LIB_OBJS)
+$(CORE_LIB):	$(CORE_OBJS) $(LIB_OBJS) $(PLATFORM_LIB_OBJS) $(USER_LIB_OBJS)
+		$(AR) rcs $@ $(CORE_OBJS) $(LIB_OBJS) $(PLATFORM_LIB_OBJS) $(USER_LIB_OBJS)
 
 error_on_caterina:
-	$(ERROR_ON_CATERINA)
+		$(ERROR_ON_CATERINA)
 
 # Use submake so we can guarantee the reset happens
 # before the upload, even with make -j
-upload: $(TARGET_HEX) verify_size
+upload:		$(TARGET_HEX) verify_size
 ifeq ($(findstring sam, $(strip $(ARCHITECTURE))), sam)
 # do reset toggle at 1200 BAUD to enter bootloader if using avrdude or bossa
 ifeq ($(strip $(UPLOAD_TOOL)), avrdude)
-	$(MAKE) reset
+		$(MAKE) reset
 else ifeq ($(findstring bossac, $(strip $(UPLOAD_TOOL))), bossac)
-	$(MAKE) reset
+		$(MAKE) reset
 endif
-	$(MAKE) do_sam_upload
+		$(MAKE) do_sam_upload
 else
-	$(MAKE) reset
-	$(MAKE) do_upload
+		$(MAKE) reset
+		$(MAKE) do_upload
 endif
 
-raw_upload: $(TARGET_HEX) verify_size
+raw_upload:	$(TARGET_HEX) verify_size
 ifeq ($(findstring sam, $(strip $(ARCHITECTURE))), sam)
-	$(MAKE) do_sam_upload
+		$(MAKE) do_sam_upload
 else
-	$(MAKE) error_on_caterina
-	$(MAKE) do_upload
+		$(MAKE) error_on_caterina
+		$(MAKE) do_upload
 endif
 
 do_upload:
-	$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ARD_OPTS) $(AVRDUDE_UPLOAD_HEX)
+		$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ARD_OPTS) \
+			$(AVRDUDE_UPLOAD_HEX)
 
 do_sam_upload:  $(TARGET_BIN) verify_size
 ifeq ($(findstring openocd, $(strip $(UPLOAD_TOOL))), openocd)
-	$(OPENOCD) $(OPENOCD_OPTS) -c "telnet_port disabled; program {{$(TARGET_BIN)}} verify reset $(BOOTLOADER_SIZE); shutdown"
+		$(OPENOCD) $(OPENOCD_OPTS) -c "telnet_port disabled; program {{$(TARGET_BIN)}} verify reset $(BOOTLOADER_SIZE); shutdown"
 else ifeq ($(findstring bossac, $(strip $(UPLOAD_TOOL))), bossac)
-	$(BOSSA) $(BOSSA_OPTS) $(TARGET_BIN)
+		$(BOSSA) $(BOSSA_OPTS) $(TARGET_BIN)
 else ifeq ($(findstring gdb, $(strip $(UPLOAD_TOOL))), gdb)
-	$(GDB) $(GDB_UPLOAD_OPTS)
+		$(GDB) $(GDB_UPLOAD_OPTS)
 else ifeq ($(strip $(UPLOAD_TOOL)), avrdude)
-	$(MAKE) ispload
+		$(MAKE) ispload
 else
-	@$(ECHO) "$(BOOTLOADER_UPLOAD_TOOL) not currently supported!\n\n"
+		@$(ECHO) "$(BOOTLOADER_UPLOAD_TOOL) not currently supported!\n\n"
 endif
 
-do_eeprom: $(TARGET_EEP) $(TARGET_HEX)
-	$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ARD_OPTS) \
-		$(AVRDUDE_UPLOAD_EEP)
+do_eeprom:	$(TARGET_EEP) $(TARGET_HEX)
+		$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ARD_OPTS) \
+			$(AVRDUDE_UPLOAD_EEP)
 
-eeprom: $(TARGET_HEX) verify_size
-	$(MAKE) reset
-	$(MAKE) do_eeprom
+eeprom:		$(TARGET_HEX) verify_size
+		$(MAKE) reset
+		$(MAKE) do_eeprom
 
-raw_eeprom: $(TARGET_HEX) verify_size
-	$(MAKE) error_on_caterina
-	$(MAKE) do_eeprom
+raw_eeprom:	$(TARGET_HEX) verify_size
+		$(MAKE) error_on_caterina
+		$(MAKE) do_eeprom
 
 reset:
-	$(call arduino_output,Resetting Arduino...)
-	$(RESET_CMD)
+		$(call arduino_output,Resetting Arduino...)
+		$(RESET_CMD)
 
 # stty on MacOS likes -F, but on Debian it likes -f redirecting
 # stdin/out appears to work but generates a spurious error on MacOS at
 # least. Perhaps it would be better to just do it in perl ?
 reset_stty:
-	for STTYF in 'stty -F' 'stty --file' 'stty -f' 'stty <' ; \
-		do $$STTYF /dev/tty >/dev/null 2>&1 && break ; \
-	done ; \
-	$$STTYF $(call get_monitor_port)  hupcl ; \
+		for STTYF in 'stty -F' 'stty --file' 'stty -f' 'stty <' ; \
+		  do $$STTYF /dev/tty >/dev/null 2>&1 && break ; \
+		done ; \
+		$$STTYF $(call get_monitor_port)  hupcl ; \
 		(sleep 0.1 2>/dev/null || sleep 1) ; \
 		$$STTYF $(call get_monitor_port) -hupcl
 
-ispload: $(TARGET_EEP) $(TARGET_HEX) verify_size
-	$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) -e \
-		$(AVRDUDE_ISPLOAD_OPTS)
+ispload:	$(TARGET_EEP) $(TARGET_HEX) verify_size
+		$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) -e \
+			$(AVRDUDE_ISPLOAD_OPTS)
 
 burn_bootloader:
 ifeq ($(findstring sam, $(strip $(ARCHITECTURE))), sam)
-ifeq ($(strip $(BOOTLOADER_UPLOAD_TOOL)), openocd)
-	$(OPENOCD) $(OPENOCD_OPTS) -c "telnet_port disabled; init; halt; $(BOOTLOADER_UNPROTECT); program {{$(BOOTLOADER_PARENT)/$(BOOTLOADER_FILE)}} verify reset; shutdown"
+    ifeq ($(strip $(BOOTLOADER_UPLOAD_TOOL)), openocd)
+				$(OPENOCD) $(OPENOCD_OPTS) -c "telnet_port disabled; init; halt; $(BOOTLOADER_UNPROTECT); program {{$(BOOTLOADER_PARENT)/$(BOOTLOADER_FILE)}} verify reset; shutdown"
+    else
+				@$(ECHO) "$(BOOTLOADER_UPLOAD_TOOL) not currently supported!\n\n"
+    endif
 else
-	@$(ECHO) "$(BOOTLOADER_UPLOAD_TOOL) not currently supported!\n\n"
-endif
-else
-ifneq ($(strip $(AVRDUDE_ISP_FUSES_PRE)),)
-	$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) -e $(AVRDUDE_ISP_FUSES_PRE)
-endif
-ifneq ($(strip $(AVRDUDE_ISP_BURN_BOOTLOADER)),)
-	$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) $(AVRDUDE_ISP_BURN_BOOTLOADER)
-endif
-ifneq ($(strip $(AVRDUDE_ISP_FUSES_POST)),)
-	$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) $(AVRDUDE_ISP_FUSES_POST)
-endif
+    ifneq ($(strip $(AVRDUDE_ISP_FUSES_PRE)),)
+				$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) -e $(AVRDUDE_ISP_FUSES_PRE)
+    endif
+    ifneq ($(strip $(AVRDUDE_ISP_BURN_BOOTLOADER)),)
+				$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) $(AVRDUDE_ISP_BURN_BOOTLOADER)
+    endif
+    ifneq ($(strip $(AVRDUDE_ISP_FUSES_POST)),)
+				$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) $(AVRDUDE_ISP_FUSES_POST)
+    endif
 endif
 
 set_fuses:
 ifneq ($(strip $(AVRDUDE_ISP_FUSES_PRE)),)
-	$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) $(AVRDUDE_ISP_FUSES_PRE)
+		$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) $(AVRDUDE_ISP_FUSES_PRE)
 endif
 ifneq ($(strip $(AVRDUDE_ISP_FUSES_POST)),)
-	$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) $(AVRDUDE_ISP_FUSES_POST)
+		$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ISP_OPTS) $(AVRDUDE_ISP_FUSES_POST)
 endif
 
 clean::
-	$(REMOVE) $(OBJDIR)
+		$(REMOVE) $(OBJDIR)
 
-size: $(TARGET_HEX)
-	$(call avr_size,$(TARGET_ELF),$(TARGET_HEX))
+size:	$(TARGET_HEX)
+		$(call avr_size,$(TARGET_ELF),$(TARGET_HEX))
 
 show_boards:
-	@$(CAT) $(BOARDS_TXT) | grep -E '^[a-zA-Z0-9_\-]+.name' | sort -uf | sed 's/.name=/:/' | column -s: -t
+		@$(CAT) $(BOARDS_TXT) | grep -E '^[a-zA-Z0-9_\-]+.name' | sort -uf | sed 's/.name=/:/' | column -s: -t
 
 show_submenu:
 	@$(CAT) $(BOARDS_TXT) | grep -E '[a-zA-Z0-9_\-]+.menu.(cpu|chip).[a-zA-Z0-9_\-]+=' | sort -uf | sed 's/.menu.\(cpu\|chip\)./:/' | sed 's/=/:/' | column -s: -t
@@ -1788,11 +1822,11 @@ else
 	$(MONITOR_CMD) -serial -sercfg $(MONITOR_BAUDRATE) $(call get_monitor_port)
 endif
 else ifeq ($(notdir $(MONITOR_CMD)), picocom)
-	$(MONITOR_CMD) -b $(MONITOR_BAUDRATE) $(MONITOR_PARAMS) $(call get_monitor_port)
+		$(MONITOR_CMD) -b $(MONITOR_BAUDRATE) $(MONITOR_PARAMS) $(call get_monitor_port)
 else ifeq ($(notdir $(MONITOR_CMD)), cu)
-	$(MONITOR_CMD) -l $(call get_monitor_port) -s $(MONITOR_BAUDRATE)
+		$(MONITOR_CMD) -l $(call get_monitor_port) -s $(MONITOR_BAUDRATE)
 else
-	$(MONITOR_CMD) $(call get_monitor_port) $(MONITOR_BAUDRATE)
+		$(MONITOR_CMD) $(call get_monitor_port) $(MONITOR_BAUDRATE)
 endif
 
 debug_init:
@@ -1802,10 +1836,10 @@ debug:
 	$(GDB) $(GDB_OPTS)
 
 disasm: $(OBJDIR)/$(TARGET).lss
-	@$(ECHO) "The compiled ELF file has been disassembled to $(OBJDIR)/$(TARGET).lss\n\n"
+		@$(ECHO) "The compiled ELF file has been disassembled to $(OBJDIR)/$(TARGET).lss\n\n"
 
 symbol_sizes: $(OBJDIR)/$(TARGET).sym
-	@$(ECHO) "A symbol listing sorted by their size have been dumped to $(OBJDIR)/$(TARGET).sym\n\n"
+		@$(ECHO) "A symbol listing sorted by their size have been dumped to $(OBJDIR)/$(TARGET).sym\n\n"
 
 verify_size:
 ifeq ($(strip $(HEX_MAXIMUM_SIZE)),)
@@ -1815,10 +1849,10 @@ endif
 See http://www.arduino.cc/en/Guide/Troubleshooting#size for tips on reducing it."; false; fi
 
 generate_assembly: $(OBJDIR)/$(TARGET).s
-	@$(ECHO) "Compiler-generated assembly for the main input source has been dumped to $(OBJDIR)/$(TARGET).s\n\n"
+		@$(ECHO) "Compiler-generated assembly for the main input source has been dumped to $(OBJDIR)/$(TARGET).s\n\n"
 
 generated_assembly: generate_assembly
-	@$(ECHO) "\"generated_assembly\" target is deprecated. Use \"generate_assembly\" target instead\n\n"
+		@$(ECHO) "\"generated_assembly\" target is deprecated. Use \"generate_assembly\" target instead\n\n"
 
 tags:
 ifneq ($(words $(wildcard $(TAGS_FILE))), 0)
@@ -1827,8 +1861,8 @@ endif
 	@$(ECHO) "Generating tags for local sources (INO an PDE files as C++): "
 	$(CTAGS_CMD) $(TAGS_FILE) --langmap=c++:+.ino.pde $(LOCAL_SRCS)
 ifneq ($(words $(ARDUINO_LIBS)), 0)
-	@$(ECHO) "Generating tags for project libraries: "
-	$(CTAGS_CMD) $(TAGS_FILE) $(foreach lib, $(ARDUINO_LIBS),$(USER_LIB_PATH)/$(lib)/*)
+		@$(ECHO) "Generating tags for project libraries: "
+		$(CTAGS_CMD) $(TAGS_FILE) $(foreach lib, $(ARDUINO_LIBS),$(USER_LIB_PATH)/$(lib)/*)
 endif
 	@$(ECHO) "Generating tags for Arduino core: "
 	$(CTAGS_CMD) $(TAGS_FILE) $(ARDUINO_CORE_PATH)/*
@@ -1837,10 +1871,10 @@ endif
 	@$(ECHO) "Tag file generation complete, output: $(TAGS_FILE)\n"
 
 help_vars:
-	@$(CAT) $(ARDMK_DIR)/arduino-mk-vars.md
+		@$(CAT) $(ARDMK_DIR)/arduino-mk-vars.md
 
 help:
-	@$(ECHO) "\nAvailable targets:\n\
+		@$(ECHO) "\nAvailable targets:\n\
   make                   - compile the code\n\
   make upload            - upload\n\
   make ispload           - upload using an ISP\n\
