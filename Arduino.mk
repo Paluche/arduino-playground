@@ -678,7 +678,7 @@ ifeq ($(strip $(NO_CORE)),)
     endif
 
     ifndef BOARD
-	BOARD := $(call PARSE_BOARD,$(BOARD_TAG),build.board)
+        BOARD := $(call PARSE_BOARD,$(BOARD_TAG),build.board)
         ifndef BOARD
             BOARD := $(shell echo $(ARCHITECTURE)_$(BOARD_TAG) | tr '[:lower:]' '[:upper:]')
         endif
@@ -903,12 +903,11 @@ LOCAL_CC_SRCS   ?= $(wildcard *.cc)
 LOCAL_PDE_SRCS  ?= $(wildcard *.pde)
 LOCAL_INO_SRCS  ?= $(wildcard *.ino)
 LOCAL_AS_SRCS   ?= $(wildcard *.S)
-LOCAL_SRCS      = $(LOCAL_C_SRCS)   $(LOCAL_CPP_SRCS) \
-		$(LOCAL_CC_SRCS)   $(LOCAL_PDE_SRCS) \
-		$(LOCAL_INO_SRCS) $(LOCAL_AS_SRCS)
-LOCAL_OBJ_FILES = $(LOCAL_C_SRCS:.c=.c.o)   $(LOCAL_CPP_SRCS:.cpp=.cpp.o) \
-		$(LOCAL_CC_SRCS:.cc=.cc.o)   $(LOCAL_PDE_SRCS:.pde=.pde.o) \
-		$(LOCAL_INO_SRCS:.ino=.ino.o) $(LOCAL_AS_SRCS:.S=.S.o)
+LOCAL_SRCS      = $(LOCAL_C_SRCS) $(LOCAL_CPP_SRCS) $(LOCAL_CC_SRCS)  \
+                  $(LOCAL_PDE_SRCS) $(LOCAL_INO_SRCS) $(LOCAL_AS_SRCS)
+LOCAL_OBJ_FILES = $(LOCAL_C_SRCS:.c=.c.o) $(LOCAL_CPP_SRCS:.cpp=.cpp.o)    \
+                  $(LOCAL_CC_SRCS:.cc=.cc.o) $(LOCAL_PDE_SRCS:.pde=.pde.o) \
+                  $(LOCAL_INO_SRCS:.ino=.ino.o) $(LOCAL_AS_SRCS:.S=.S.o)
 LOCAL_OBJS      = $(patsubst %,$(OBJDIR)/%,$(LOCAL_OBJ_FILES))
 
 ifeq ($(words $(LOCAL_SRCS)), 0)
@@ -1677,7 +1676,7 @@ endif
 ########################################################################
 # Explicit targets start here
 
-all: 		$(TARGET_EEP) $(TARGET_BIN) $(TARGET_HEX)
+all: $(TARGET_EEP) $(TARGET_BIN) $(TARGET_HEX)
 
 # Rule to create $(OBJDIR) automatically. All rules with recipes that
 # create a file within it, but do not already depend on a file within it
