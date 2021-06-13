@@ -1730,7 +1730,7 @@ else
 		$(MAKE) do_upload
 endif
 
-do_upload:
+do_upload: all
 		$(AVRDUDE) $(AVRDUDE_COM_OPTS) $(AVRDUDE_ARD_OPTS) \
 			$(AVRDUDE_UPLOAD_HEX)
 
